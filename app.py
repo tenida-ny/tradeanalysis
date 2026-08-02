@@ -10,7 +10,7 @@ import streamlit as st
 
 from fidelity_parser import parse_fidelity_csv
 from matcher import match_trades
-from metrics import monthly_summary, daily_summary, METRIC_ORDER
+from metrics import monthly_dashboard, daily_summary
 
 st.set_page_config(page_title="Trading Performance Analyzer", layout="wide")
 st.title("📈 Trading Performance Analyzer")
@@ -110,24 +110,50 @@ else:
     c3.metric("Win rate", f"{wins / len(trades):.0%}" if len(trades) else "—")
     c4.metric("W / L", f"{wins} / {losses}")
 
-    tab_month, tab_day, tab_trades, tab_quality = st.tabs(
-        ["Monthly dashboard", "Daily summary", "Trade detail", "Data quality"]
+    tab_month, tab_day, tab_quality = st.tabs(
+        ["Monthly dashboard", "Daily summary", "Data quality"]
     )
 
     with tab_month:
-        mdf = monthly_summary(trades)
+        years = sorted(trades["close_date"].dt.year.unique())
+        year = years[-1] if len(years) == 1 else st.selectbox(
+            "Year", years, index=len(years) - 1)
+        mdf = monthly_dashboard(trades, int(year))
+
+        def _money(v):
+            if pd.isna(v):
+                return "—"
+            return f"$ ({abs(v):,.2f})" if v < 0 else f"$ {v:,.2f}"
+
+        def _num(v):
+            return "—" if pd.isna(v) else f"{v:,.2f}"
+
+        def _pct(v):
+            return "—" if pd.isna(v) else f"{v:.0%}"
+
+        def _int(v):
+            return "0" if pd.isna(v) else f"{int(v)}"
+
+        fmt = {
+            "Trade Count": _int, "No of Win Trades": _int,
+            "No of Loss Trades": _int,
+            "Average Gain": _money, "Avg Loss": _money,
+            "Avg Gain/Win Trade": _money, "Avg Loss/Loss Trade": _money,
+            "Average Margin per trade": _money,
+            "Largest Gain": _num, "Largest Loss": _num,
+            "Gain Loss Ratio": _num,
+            "Total Loss": _num, "Total Gain": _num,
+            "Net P/L": _num, "Cumulative Net P/L": _num,
+            "WIN%": _pct, "Batting Average": _pct,
+            "Average Gain%": _pct, "Average Loss %": _pct,
+        }
         transpose = st.toggle(
             "Transpose (metrics as rows, months as columns)", value=False)
-        fmt = {c: "{:,.2f}" for c in mdf.columns
-               if c not in ("Trade Count", "No of Win Trades", "No of Loss Trades")}
-        fmt.update({"WIN%": "{:.1%}", "Batting Average": "{:.1%}",
-                    "Average Gain %": "{:.2f}%", "Average Loss %": "{:.2f}%"})
         show = mdf.T if transpose else mdf
-        st.dataframe(show.style.format(fmt if not transpose else None,
-                                       na_rep="—"),
-                     use_container_width=True)
-        st.bar_chart(mdf["Net P/L ($)"])
-        st.line_chart(mdf["Cumulative Net P/L ($)"])
+        st.dataframe(show if transpose else show.style.format(fmt),
+                     use_container_width=True, height=490)
+        st.bar_chart(mdf["Net P/L"])
+        st.line_chart(mdf["Cumulative Net P/L"])
 
     with tab_day:
         ddf = daily_summary(trades)
@@ -135,20 +161,6 @@ else:
                                        "Cumulative Net P/L ($)": "{:,.2f}"}),
                      use_container_width=True)
         st.bar_chart(ddf["Net P/L ($)"])
-
-    with tab_trades:
-        detail = trades[["symbol", "direction", "qty", "open_date",
-                         "close_date", "holding_days", "open_value",
-                         "close_value", "pl", "pct", "month"]].copy()
-        detail["pct"] = detail["pct"] * 100
-        detail = detail.rename(columns={
-            "open_value": "Capital ($)", "close_value": "Proceeds ($)",
-            "pl": "P/L ($)", "pct": "P/L %", "holding_days": "Days held",
-        })
-        st.dataframe(detail.style.format({
-            "Capital ($)": "{:,.2f}", "Proceeds ($)": "{:,.2f}",
-            "P/L ($)": "{:,.2f}", "P/L %": "{:,.2f}", "qty": "{:g}",
-        }), use_container_width=True)
 
     with tab_quality:
         st.subheader("Excluded / informational items")
